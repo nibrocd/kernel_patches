@@ -21,7 +21,7 @@
 	};
 
 	chosen {
-		bootargs = "";
+		bootargs = "cma=256M";
 		stdout-path = "serial0:115200n8";
 	};
 
