@@ -70,15 +70,12 @@ module tb_tpg(
 // Test Bench Signals
 //////////////////////////////////////////////////////////////////////////////////
 // Clock and Reset
-bit aclk = 0, fclk = 0, aresetn = 1;
+bit aclk = 0, aresetn = 1;
 // 
 xil_axi_resp_t 	resp;
 // Signals corresponding to the TPG AXI4-Stream interface
 bit tpg_tready = 1, tpg_tuser, tpg_tvalid, tpg_tlast;
-bit [15:0] tpg_tdata;
-
-bit m00_axis_tuser_0, m00_axis_tvalid_0, m00_axis_tlast_0;
-bit [15:0] m00_axis_tdata_0;
+bit [23:0] tpg_tdata;
 // Test Bench variables
 integer counter_width = 0, counter_height = 0;
 integer final_width = 0, final_height = 0;
@@ -98,33 +95,25 @@ parameter integer tpg_base_address = 12'h000;
     parameter integer TPG_ACTIVE_W_REG      = tpg_base_address + 8'h18;
     // background_pattern_id
     parameter integer TPG_BG_PATTERN_ID_REG = tpg_base_address + 8'h20;
-    //pixel format
-    parameter integer TPG_BG_PIXEL_ID_REG = tpg_base_address + 8'h40;
 //////////////////////////////////////////////////////////////////////////////////
 // VIP Configuration
-integer height=480, width=640;
+integer height=400, width=640;
 //////////////////////////////////////////////////////////////////////////////////
 
 
-// Generate the clock : 100 MHz    
-always #5ns aclk = ~aclk;
-always #0.5ns fclk = ~fclk;
+// Generate the clock : 50 MHz    
+always #10ns aclk = ~aclk;
 
 // Instanciation of the Unit Under Test (UUT)
 TPG_sim_bd_wrapper UUT
 (
-    .aclk_50MHz     (aclk),
-    .fclk_0         (fclk),
+    .aclk_50MHz    (aclk),
     .aresetn_0      (aresetn),
     .tpg_tdata      (tpg_tdata),
     .tpg_tlast      (tpg_tlast),
     .tpg_tready     (tpg_tready),
     .tpg_tuser      (tpg_tuser),
-    .tpg_tvalid     (tpg_tvalid),
-    .m00_axis_tdata_0     (m00_axis_tdata_0),
-    .m00_axis_tlast_0     (m00_axis_tlast_0),
-    .m00_axis_tuser_0     (m00_axis_tuser_0),
-    .m00_axis_tvalid_0     (m00_axis_tvalid_0)
+    .tpg_tvalid     (tpg_tvalid)
 );
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -141,11 +130,11 @@ initial begin
     aresetn = 1;
     
     // Start of the first frame
-    @(posedge m00_axis_tuser_0)
+    @(posedge tpg_tuser)
     
     // Start of the second frame, stop the simulation
-    @(posedge m00_axis_tuser_0)
-    wait (m00_axis_tuser_0 == 1'b0);
+    @(posedge tpg_tuser)
+    wait (tpg_tuser == 1'b0);
     #20ns;
     if((final_height == height)&&(final_width == width))
         $display("Configured and output resolution match, test succeeded");
@@ -179,9 +168,8 @@ initial begin
     //Set TPG output size
     master_agent.AXI4LITE_WRITE_BURST(TPG_ACTIVE_H_REG,0,height,resp);
     master_agent.AXI4LITE_WRITE_BURST(TPG_ACTIVE_W_REG,0,width,resp);
-    master_agent.AXI4LITE_WRITE_BURST(TPG_BG_PIXEL_ID_REG,0,2,resp);
     //Set TPG output background ID
-    master_agent.AXI4LITE_WRITE_BURST(TPG_BG_PATTERN_ID_REG,0,16,resp);
+    master_agent.AXI4LITE_WRITE_BURST(TPG_BG_PATTERN_ID_REG,0,9,resp);
     
     #200ns
     // Start the TPG in free-running mode    
@@ -195,8 +183,8 @@ end
 //
 always @(posedge aclk)
 begin
-    if((m00_axis_tvalid_0==1)&&(tpg_tready==1)) begin
-        if(m00_axis_tlast_0==1) begin
+    if((tpg_tvalid==1)&&(tpg_tready==1)) begin
+        if(tpg_tlast==1) begin
             final_width = counter_width + 1;
             counter_width = 0;         
         end
@@ -211,12 +199,12 @@ end
 //
 always @(posedge aclk)
 begin
-    if((m00_axis_tvalid_0==1)&&(tpg_tready==1)) begin
-        if(m00_axis_tuser_0==1) begin
+    if((tpg_tvalid==1)&&(tpg_tready==1)) begin
+        if(tpg_tuser==1) begin
             final_height =  counter_height;
             counter_height = 0;       
         end
-        else if(m00_axis_tlast_0==1)
+        else if(tpg_tlast==1)
             counter_height = counter_height + 1;         
     end
 end

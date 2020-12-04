@@ -2,7 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity BRAMbuffer is
+entity SobelBuffer is
 	generic (
 		-- Users to add parameters here
 
@@ -44,9 +44,9 @@ entity BRAMbuffer is
 		
 		fclk : std_logic
 	);
-end BRAMbuffer;
+end SobelBuffer;
 
-architecture behave of BRAMbuffer is
+architecture behave of SObelBuffer is
 signal ena : std_logic_vector(4 downto 0) := "00000";
 signal enb : std_logic_vector(4 downto 0) := "00000";
 signal wra : std_logic_vector(4 downto 0) := "00000";
@@ -57,6 +57,15 @@ signal ina : std_logic_vector(7 downto 0) := (others => '0');
 signal inb : std_logic_vector(7 downto 0) := (others => '0');
 signal out0a, out1a, out2a, out3a, out4a : std_logic_vector(7 downto 0) := (others => '0');
 signal out0b, out1b, out2b, out3b, out4b : std_logic_vector(7 downto 0) := (others => '0');
+
+type kernel is array(0 to 3, 0 to 2) of integer range 0 to 255;
+signal kern : kernel;
+
+shared variable inLn : std_logic_vector(4 downto 0) := "00001";
+shared variable outLn : std_logic_vector(4 downto 0) := "00010";
+shared variable pos : integer range 0 to 640 := 0;
+shared variable lnCnt : integer range 0 to 480 := 0;
+shared variable first : std_logic := '1';
 
     component rams_tdp_rf_rf is
         port(
@@ -89,18 +98,14 @@ LN3: rams_tdp_rf_rf port map (clka=>aclk, clkb=>fclk, ena=>ena(3), enb=>enb(3), 
 LN4: rams_tdp_rf_rf port map (clka=>aclk, clkb=>fclk, ena=>ena(4), enb=>enb(4), wea=>wra(4), web=>wrb(4), addra=>posa, addrb=>posb, dia=>ina, dib=>inb, doa=>out4a, dob=>out4b);
 
 process(aclk, s00_axis_tvalid, m00_axis_tready)
-    variable inLn : std_logic_vector(4 downto 0) := "00001";
-    variable outLn : std_logic_vector(4 downto 0) := "00010";
-    variable pos : integer range 0 to 640 := 0;
-    variable lnCnt : integer range 0 to 480 := 0;
-    variable first : std_logic := '1';
-    variable read : std_logic := '0';
+
 begin
 
-    wra <= inLn;
-    ena <= inLn or outLn;
-    ina <= s00_axis_tdata(7 downto 0);
-    posa <= std_logic_vector(to_unsigned(pos, 10));
+            wra <= inLn;
+            ena <= inLn or outLn;
+            ina <= s00_axis_tdata(7 downto 0);
+            posa <= std_logic_vector(to_unsigned(pos, 10));
+
 
 
 
@@ -108,7 +113,7 @@ begin
     
         m00_axis_tdest <= s00_axis_tdest;
     
-        if s00_axis_tvalid = '1' then
+        if s00_axis_tvalid = '1' then     
             
 
             
@@ -187,5 +192,136 @@ begin
         end if;
     end if;
 end process;
+
+
+process(fclk)
+    variable state : integer range 0 to 3 := 0;
+    variable sum : std_logic_vector(7 downto 0);
+    variable sum1 : integer range 0 to 1023;
+    variable sum2 : integer range 0 to 1023;
+    variable sum12 : integer range 0 to 1023;
+    variable sum3 : integer range 0 to 1023;
+    variable sum4 : integer range 0 to 1023;
+    variable sum34 : integer range 0 to 1023;
+    variable donePos : integer range 0 to 650 := 0;
+    variable nextPos : integer range 0 to 650 := 0;
+begin
+
+if rising_edge(fclk) then
+
+    if pos >= 1 and pos <= 637 and donePos /= pos then
+        enb <= not(inLn);
+        wrb <= outLn;
+        
+        if state = 0 then   --address data 0
+            state := state +1;
+            nextPos := pos+2;
+            
+            if inLn = "10000" then
+                kern(3,0) <= to_integer(unsigned(out1b));
+                kern(3,1) <= to_integer(unsigned(out2b));
+                kern(3,2) <= to_integer(unsigned(out3b));
+            elsif inLn = "00001" then
+                kern(3,0) <= to_integer(unsigned(out2b));
+                kern(3,1) <= to_integer(unsigned(out3b));
+                kern(3,2) <= to_integer(unsigned(out4b));
+            elsif inLn = "00010" then
+                kern(3,0) <= to_integer(unsigned(out3b));
+                kern(3,1) <= to_integer(unsigned(out4b));
+                kern(3,2) <= to_integer(unsigned(out0b));
+            elsif inLn = "00100" then
+                kern(3,0) <= to_integer(unsigned(out4b));
+                kern(3,1) <= to_integer(unsigned(out0b));
+                kern(3,2) <= to_integer(unsigned(out1b));
+            elsif inLn = "01000" then
+                kern(3,0) <= to_integer(unsigned(out0b));
+                kern(3,1) <= to_integer(unsigned(out1b));
+                kern(3,2) <= to_integer(unsigned(out2b));
+            end if;
+            
+            sum1 := (kern(0,0) + (kern(1,0)*2) + kern(2,0));
+            sum2 := (kern(0,2) + (kern(1,2)*2) + kern(2,2));
+            
+            sum3 := (kern(2,0) + (kern(2,1)*2) + kern(2,2));
+            sum4 := (kern(0,0) + (kern(0,1)*2) + kern(0,2));
+
+            
+        elsif state = 1 then --address data 1 get data 0
+            state := state +1;
+            sum12 := abs(sum1 - sum2);
+            sum34 := abs(sum3 - sum4);
+            posb <= std_logic_vector(to_unsigned(pos, 10));
+              
+        elsif state = 2 then --sum
+            sum := std_logic_vector(to_unsigned( ((sum12 + sum34)/8), 8));
+            inb <= sum;
+            donePos := pos;
+            
+            kern(0,0) <= kern(1,0);
+            kern(0,1) <= kern(1,1);
+            kern(0,2) <= kern(1,2);
+            
+            kern(1,0) <= kern(2,0);
+            kern(1,1) <= kern(2,1);
+            kern(1,2) <= kern(2,2);
+            
+            kern(2,0) <= kern(3,0);
+            kern(2,1) <= kern(3,1);
+            kern(2,2) <= kern(3,2);
+            posb <= std_logic_vector(to_unsigned(nextPos, 10));
+            state := 0;
+        end if;
+        
+    elsif pos = 0 then
+        enb <= not(inLn);
+        
+        if state = 0 then
+            state := state +1;
+            kern(0,0) <= kern(1,0);
+            kern(0,1) <= kern(1,1);
+            kern(0,2) <= kern(1,2);
+            
+            kern(1,0) <= kern(2,0);
+            kern(1,1) <= kern(2,1);
+            kern(1,2) <= kern(2,2);
+            
+            kern(2,0) <= kern(3,0);
+            kern(2,1) <= kern(3,1);
+            kern(2,2) <= kern(3,2);
+            posb <= std_logic_vector(to_unsigned(pos+1, 10));
+            
+            
+        elsif state = 1 then --address data 1 get data 0
+
+            posb <= std_logic_vector(to_unsigned(pos, 10));
+            if inLn = "10000" then
+                kern(3,0) <= to_integer(unsigned(out1b));
+                kern(3,1) <= to_integer(unsigned(out2b));
+                kern(3,2) <= to_integer(unsigned(out3b));
+            elsif inLn = "00001" then
+                kern(3,0) <= to_integer(unsigned(out2b));
+                kern(3,1) <= to_integer(unsigned(out3b));
+                kern(3,2) <= to_integer(unsigned(out4b));
+            elsif inLn = "00010" then
+                kern(3,0) <= to_integer(unsigned(out3b));
+                kern(3,1) <= to_integer(unsigned(out4b));
+                kern(3,2) <= to_integer(unsigned(out0b));
+            elsif inLn = "00100" then
+                kern(3,0) <= to_integer(unsigned(out4b));
+                kern(3,1) <= to_integer(unsigned(out0b));
+                kern(3,2) <= to_integer(unsigned(out1b));
+            elsif inLn = "01000" then
+                kern(3,0) <= to_integer(unsigned(out0b));
+                kern(3,1) <= to_integer(unsigned(out1b));
+                kern(3,2) <= to_integer(unsigned(out2b));
+            end if;
+            
+            state := 0;
+        end if;
+    end if;
+end if;
+
+end process;
+
 
 end behave;
